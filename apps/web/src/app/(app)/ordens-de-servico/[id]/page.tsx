@@ -26,6 +26,12 @@ export default async function OrdemDeServicoDetailPage({ params }: { params: { i
 
   if (!os) notFound();
 
+  const history = await db.auditLog.findMany({
+    where: { entity: "ServiceOrder", entityId: os.id },
+    include: { user: true },
+    orderBy: { timestamp: "asc" },
+  });
+
   const transitions: { status: ServiceOrderStatus; label: string }[] = [
     { status: "OPEN", label: "Aberta" },
     { status: "IN_PROGRESS", label: "Em andamento" },
@@ -121,6 +127,33 @@ export default async function OrdemDeServicoDetailPage({ params }: { params: { i
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Histórico</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2 text-sm">
+            {history.map((entry) => {
+              const metadata = entry.metadata as { from?: string; to?: string };
+              const description =
+                entry.action === "created"
+                  ? "Ordem de serviço criada"
+                  : `Status alterado de ${STATUS_LABEL[metadata.from ?? ""] ?? metadata.from} para ${STATUS_LABEL[metadata.to ?? ""] ?? metadata.to}`;
+              return (
+                <li key={entry.id} className="flex items-center justify-between border-b pb-2 last:border-0">
+                  <span>
+                    {description} — {entry.user?.name ?? "sistema"}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(entry.timestamp)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -48,6 +48,17 @@ export async function createServiceOrderAction(formData: FormData) {
     },
   });
 
+  await db.auditLog.create({
+    data: {
+      tenantId: session.user.tenantId,
+      userId: session.user.id,
+      action: "created",
+      entity: "ServiceOrder",
+      entityId: serviceOrder.id,
+      metadata: {},
+    },
+  });
+
   revalidatePath("/ordens-de-servico");
   redirect(`/ordens-de-servico/${serviceOrder.id}`);
 }
@@ -92,7 +103,19 @@ export async function updateServiceOrderStatusAction(serviceOrderId: string, sta
   const { db, session } = await requireTenantSession();
   assertCan(session.user.role as any, "ordens_de_servico", "write");
 
+  const previous = await db.serviceOrder.findUniqueOrThrow({ where: { id: serviceOrderId }, select: { status: true } });
   await db.serviceOrder.update({ where: { id: serviceOrderId }, data: { status } });
+
+  await db.auditLog.create({
+    data: {
+      tenantId: session.user.tenantId,
+      userId: session.user.id,
+      action: "status_changed",
+      entity: "ServiceOrder",
+      entityId: serviceOrderId,
+      metadata: { from: previous.status, to: status },
+    },
+  });
 
   revalidatePath(`/ordens-de-servico/${serviceOrderId}`);
   revalidatePath("/ordens-de-servico");
@@ -102,6 +125,16 @@ export async function deleteServiceOrderAction(serviceOrderId: string) {
   const { db, session } = await requireTenantSession();
   assertCan(session.user.role as any, "ordens_de_servico", "write");
 
+  await db.auditLog.create({
+    data: {
+      tenantId: session.user.tenantId,
+      userId: session.user.id,
+      action: "deleted",
+      entity: "ServiceOrder",
+      entityId: serviceOrderId,
+      metadata: {},
+    },
+  });
   await db.serviceOrder.delete({ where: { id: serviceOrderId } });
 
   revalidatePath("/ordens-de-servico");

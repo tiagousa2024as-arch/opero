@@ -38,8 +38,9 @@ describe("applyInvoiceStatus", () => {
 
     const transactions = await prisma.transaction.findMany({ where: { relatedInvoiceId: invoice.id } });
     expect(transactions).toHaveLength(1);
-    expect(transactions[0].type).toBe("INCOME");
-    expect(Number(transactions[0].amount)).toBe(150);
+    const transaction = transactions[0]!;
+    expect(transaction.type).toBe("INCOME");
+    expect(Number(transaction.amount)).toBe(150);
   });
 
   it("is idempotent — a duplicate PAID webhook does not create a second transaction", async () => {

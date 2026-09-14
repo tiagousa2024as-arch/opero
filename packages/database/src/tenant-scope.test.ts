@@ -30,8 +30,8 @@ describe("getTenantClient tenant isolation", () => {
     const dbA = getTenantClient(tenantA.id);
     const dbB = getTenantClient(tenantB.id);
 
-    await dbA.customer.create({ data: { name: "Only in A" } });
-    await dbB.customer.create({ data: { name: "Only in B" } });
+    await dbA.customer.create({ data: { name: "Only in A" } as any });
+    await dbB.customer.create({ data: { name: "Only in B" } as any });
 
     const seenByA = await dbA.customer.findMany();
     const seenByB = await dbB.customer.findMany();
@@ -45,7 +45,7 @@ describe("getTenantClient tenant isolation", () => {
     const dbA = getTenantClient(tenantA.id);
     const dbB = getTenantClient(tenantB.id);
 
-    const belongsToB = await dbB.customer.create({ data: { name: "B's customer" } });
+    const belongsToB = await dbB.customer.create({ data: { name: "B's customer" } as any });
 
     await expect(dbA.customer.update({ where: { id: belongsToB.id }, data: { name: "hijacked" } })).rejects.toThrow();
     await expect(dbA.customer.delete({ where: { id: belongsToB.id } })).rejects.toThrow();
