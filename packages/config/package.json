@@ -1,0 +1,12 @@
+{
+  "name": "@opero/config",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "files": [
+    "base.json",
+    "nextjs.json",
+    "tailwind.config.ts",
+    "eslint-preset.js"
+  ]
+}

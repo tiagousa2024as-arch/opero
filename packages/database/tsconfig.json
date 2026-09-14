@@ -1,0 +1,10 @@
+{
+  "extends": "@opero/config/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "noEmit": false,
+    "declaration": true
+  },
+  "include": ["src", "prisma/seed.ts"]
+}
