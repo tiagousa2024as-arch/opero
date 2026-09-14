@@ -18,3 +18,5 @@ pnpm-debug.log*
 playwright-report
 test-results
 cdk.out
+cdk.context.json
+infra/dist

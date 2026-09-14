@@ -1,5 +1,25 @@
 import { PrismaClient } from "@prisma/client";
 
+/**
+ * App Runner (Phase 2 infra, see infra/lib/compute-stack.ts) injects the
+ * RDS credential as discrete env vars — DB_HOST/DB_PORT/DB_NAME/
+ * DB_USERNAME/DB_PASSWORD — rather than one connection-string secret,
+ * because Secrets Manager's RDS-generated secret holds those fields
+ * separately and there's no CloudFormation-native way to concatenate them
+ * into a URL without a custom resource. Local dev keeps using a literal
+ * DATABASE_URL from .env, so this only ever fires in that one deployment
+ * shape.
+ */
+function resolveDatabaseUrl(): string | undefined {
+  if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
+
+  const { DB_HOST, DB_PORT, DB_NAME, DB_USERNAME, DB_PASSWORD } = process.env;
+  if (!DB_HOST || !DB_NAME || !DB_USERNAME || !DB_PASSWORD) return undefined;
+
+  const encodedPassword = encodeURIComponent(DB_PASSWORD);
+  return `postgresql://${DB_USERNAME}:${encodedPassword}@${DB_HOST}:${DB_PORT ?? "5432"}/${DB_NAME}?sslmode=require`;
+}
+
 // Global singleton to avoid exhausting connections in dev (Next.js HMR).
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -12,6 +32,7 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
+    datasourceUrl: resolveDatabaseUrl(),
     log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
   });
 

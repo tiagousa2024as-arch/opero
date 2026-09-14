@@ -1,0 +1,73 @@
+name: Deploy
+
+# Runs the Phase 2 production deploy (PART F): build the Next.js image,
+# push it to ECR, run pending Prisma migrations against the production
+# database, then trigger the App Runner deployment. Everything here is
+# gated behind the `production` GitHub Environment, which should hold the
+# AWS credentials and require them to actually exist before this can run
+# at all — see PART G: this needs a real AWS account with billing
+# configured, which is not assumed to be true yet.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write # for OIDC role assumption — see the README for setup
+      contents: read
+    env:
+      AWS_REGION: sa-east-1
+      ECR_REPOSITORY: opero-web
+      APP_RUNNER_SERVICE_NAME: opero-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t "$REGISTRY/$ECR_REPOSITORY:${{ github.sha }}" -t "$REGISTRY/$ECR_REPOSITORY:latest" .
+          docker push "$REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
+          docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run pending migrations against production
+        run: pnpm --filter @opero/database exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
+      - name: Trigger App Runner deployment
+        run: |
+          SERVICE_ARN=$(aws apprunner list-services \
+            --query "ServiceSummaryList[?ServiceName=='${APP_RUNNER_SERVICE_NAME}'].ServiceArn" \
+            --output text)
+          aws apprunner start-deployment --service-arn "$SERVICE_ARN"

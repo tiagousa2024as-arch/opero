@@ -20,6 +20,10 @@ packages/
 infra/        AWS CDK (TypeScript) — infrastructure as code
 ```
 
+## Deployment (Phase 2)
+
+`infra/` has the full CDK app for production (VPC, RDS, S3, SES, Secrets Manager, App Runner) and `.github/workflows/deploy.yml` builds the Docker image, pushes to ECR, runs migrations and triggers the App Runner deployment on merge to `main`. None of this has been deployed anywhere — it needs a real AWS account first. See `infra/README.md` for the setup checklist.
+
 ## Getting started
 
 ```bash
