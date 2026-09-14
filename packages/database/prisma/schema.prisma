@@ -228,6 +228,9 @@ model Appointment {
   endTime        DateTime          @map("end_time")
   status         AppointmentStatus @default(SCHEDULED)
   assignedUserId String?           @map("assigned_user_id")
+  // Set once apps/worker's scheduler has enqueued a reminder for this
+  // appointment, so it isn't enqueued again on the next scheduler tick.
+  reminderSentAt DateTime?         @map("reminder_sent_at")
   createdAt      DateTime          @default(now()) @map("created_at")
   updatedAt      DateTime          @updatedAt @map("updated_at")
 

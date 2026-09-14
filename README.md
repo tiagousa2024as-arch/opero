@@ -11,18 +11,19 @@ pnpm + Turborepo monorepo, Next.js 14 (App Router) + TypeScript, Tailwind + shad
 ```
 apps/
   web/        Next.js app — marketing site + authenticated app + admin
-  worker/     Background jobs (Phase 2+)
+  worker/     Background jobs: appointment reminders (WhatsApp), SQS consumer + scheduler
 packages/
   database/   Prisma schema, migrations, generated client
   ui/         Shared UI components (shadcn-based design system)
   config/     Shared eslint/tsconfig/tailwind config
   auth/       Auth.js config, RBAC helpers, tenant-scoping session helper
+  notifications/ WhatsApp gateway abstraction + reminder logic, shared by apps/web and apps/worker
 infra/        AWS CDK (TypeScript) — infrastructure as code
 ```
 
-## Deployment (Phase 2)
+## Deployment (Phase 2-3)
 
-`infra/` has the full CDK app for production (VPC, RDS, S3, SES, Secrets Manager, App Runner) and `.github/workflows/deploy.yml` builds the Docker image, pushes to ECR, runs migrations and triggers the App Runner deployment on merge to `main`. None of this has been deployed anywhere — it needs a real AWS account first. See `infra/README.md` for the setup checklist.
+`infra/` has the full CDK app for production (VPC, RDS, S3, SES, Secrets Manager, SQS, Redis, ECS/ALB for apps/web, a separate ECS service for apps/worker) and `.github/workflows/deploy.yml` builds both Docker images, pushes to ECR, runs migrations and forces a new ECS deployment for each service on merge to `main`. None of this has been deployed anywhere — it needs a real AWS account first. See `infra/README.md` for the setup checklist.
 
 ## Getting started
 

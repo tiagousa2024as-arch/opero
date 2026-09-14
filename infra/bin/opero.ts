@@ -6,7 +6,10 @@ import { DatabaseStack } from "../lib/database-stack";
 import { StorageStack } from "../lib/storage-stack";
 import { EmailStack } from "../lib/email-stack";
 import { SecretsStack } from "../lib/secrets-stack";
+import { QueueStack } from "../lib/queue-stack";
+import { CacheStack } from "../lib/cache-stack";
 import { ComputeStack } from "../lib/compute-stack";
+import { WorkerStack } from "../lib/worker-stack";
 import { ObservabilityStack } from "../lib/observability-stack";
 
 const app = new cdk.App();
@@ -19,7 +22,7 @@ const env: cdk.Environment = {
   region: process.env.CDK_DEFAULT_REGION ?? "sa-east-1",
 };
 
-const stackProps = { env, tags: { project: "opero", phase: "2" } };
+const stackProps = { env, tags: { project: "opero", phase: "3" } };
 
 const network = new NetworkStack(app, "Opero-Network", stackProps);
 
@@ -31,16 +34,35 @@ new EmailStack(app, "Opero-Email", { ...stackProps, domainName: "opero.com.br" }
 
 const secrets = new SecretsStack(app, "Opero-Secrets", stackProps);
 
+const queues = new QueueStack(app, "Opero-Queues", stackProps);
+
+const cache = new CacheStack(app, "Opero-Cache", { ...stackProps, vpc: network.vpc });
+
 const compute = new ComputeStack(app, "Opero-Compute", {
   ...stackProps,
   vpc: network.vpc,
   dbInstance: database.instance,
   attachmentsBucket: storage.attachmentsBucket,
   appSecrets: secrets.appSecrets,
+  redisEndpoint: cache.cluster.attrRedisEndpointAddress,
+  remindersQueue: queues.remindersQueue,
+  billingQueue: queues.billingQueue,
+});
+
+const worker = new WorkerStack(app, "Opero-Worker", {
+  ...stackProps,
+  vpc: network.vpc,
+  cluster: compute.cluster,
+  dbInstance: database.instance,
+  appSecrets: secrets.appSecrets,
+  remindersQueue: queues.remindersQueue,
+  billingQueue: queues.billingQueue,
 });
 
 new ObservabilityStack(app, "Opero-Observability", {
   ...stackProps,
   dbInstance: database.instance,
-  service: compute.service,
+  webService: compute.service,
+  workerService: worker.service,
+  alb: compute.alb,
 });

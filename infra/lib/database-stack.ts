@@ -8,11 +8,11 @@ export interface DatabaseStackProps extends StackProps {
 }
 
 /**
- * Single-instance, single-AZ Postgres for Phase 1 (PART B: "single
- * instance, db.t4g.micro/small" is explicitly the MVP tier). Multi-AZ and
- * a read replica are Phase 3 work per the same table — don't add them
- * here pre-emptively; they cost real money for a database with no
- * traffic yet.
+ * Single-instance, single-AZ Postgres for Phase 1-3 (PART B: multi-AZ and
+ * a read replica are Phase 4 work — don't add them here pre-emptively).
+ * Phase 3 (PART F) moves it into the private subnet introduced in
+ * NetworkStack, with a bastion host for admin access over SSM (no open
+ * SSH port, no keypair to manage or leak).
  */
 export class DatabaseStack extends Stack {
   public readonly instance: rds.DatabaseInstance;
@@ -27,24 +27,19 @@ export class DatabaseStack extends Stack {
       allowAllOutbound: false,
     });
 
-    // Scoped to the VPC's own CIDR rather than the App Runner connector's
-    // security group specifically: an SG-to-SG rule here would need a
-    // property from Opero-Compute (the connector's SG id) while
-    // Opero-Compute already depends on this stack for the VPC/instance —
-    // a cycle CloudFormation can't express across stacks. Everything on
-    // this VPC is ours (see NetworkStack), so the CIDR is an equivalent
-    // boundary without the circular reference.
+    // Scoped to the VPC's own CIDR rather than specific security groups,
+    // to avoid cross-stack dependency cycles between this stack and every
+    // stack whose compute needs to reach the database (App Runner
+    // connector, ECS tasks, the bastion). Everything on this VPC is ours
+    // (see NetworkStack).
     this.securityGroup.addIngressRule(ec2.Peer.ipv4(props.vpc.vpcCidrBlock), ec2.Port.tcp(5432), "VPC -> RDS Postgres");
 
     this.instance = new rds.DatabaseInstance(this, "Postgres", {
       engine: rds.DatabaseInstanceEngine.postgres({ version: rds.PostgresEngineVersion.VER_16 }),
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE4_GRAVITON, ec2.InstanceSize.MICRO),
       vpc: props.vpc,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
       securityGroups: [this.securityGroup],
-      // Never reachable from the public internet even though it sits in a
-      // public subnet — see NetworkStack's comment on why the subnet is
-      // public at all. Only security-group-scoped traffic ever reaches it.
       publiclyAccessible: false,
       databaseName: "opero",
       credentials: rds.Credentials.fromGeneratedSecret("opero_admin"),
@@ -58,6 +53,17 @@ export class DatabaseStack extends Stack {
       // deleted just because someone ran `cdk destroy` on the wrong stack.
       removalPolicy: RemovalPolicy.RETAIN,
       deletionProtection: true,
+    });
+
+    // Admin access: `aws ssm start-session --target <instance-id>` then
+    // tunnel Postgres through it (`aws ssm start-session ... --document-name
+    // AWS-StartPortForwardingSessionToRemoteHost`) — no bastion SSH key to
+    // lose or rotate, no port open to the internet. Already covered by the
+    // VPC-CIDR ingress rule above since it sits in the same private subnet.
+    new ec2.BastionHostLinux(this, "DbBastion", {
+      vpc: props.vpc,
+      subnetSelection: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T4G, ec2.InstanceSize.NANO),
     });
   }
 }

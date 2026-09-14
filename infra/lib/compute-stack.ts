@@ -1,11 +1,12 @@
 import { CfnOutput, Duration, Stack, type StackProps } from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecr from "aws-cdk-lib/aws-ecr";
-import * as iam from "aws-cdk-lib/aws-iam";
+import * as elbv2 from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
-import * as apprunner from "@aws-cdk/aws-apprunner-alpha";
+import * as sqs from "aws-cdk-lib/aws-sqs";
 import type { Construct } from "constructs";
 
 export interface ComputeStackProps extends StackProps {
@@ -13,16 +14,24 @@ export interface ComputeStackProps extends StackProps {
   dbInstance: rds.DatabaseInstance;
   attachmentsBucket: s3.Bucket;
   appSecrets: secretsmanager.Secret;
+  redisEndpoint: string;
+  remindersQueue: sqs.Queue;
+  billingQueue: sqs.Queue;
 }
 
 /**
- * Phase 1 compute per PART B: App Runner reading a container image from
- * ECR, auto-deployed on push. Migrating to ECS Fargate behind an ALB is
- * explicitly Phase 3 work — don't build that here.
+ * Phase 3 compute (PART F): ECS Fargate behind an ALB, replacing the
+ * Phase 1/2 App Runner service (see git history) now that there's a
+ * reason to want the finer network control — private subnets, a shared
+ * cluster with the worker service, Redis reachability. `apps/worker` gets
+ * its own service in this same cluster (see WorkerStack) with no ALB,
+ * since it's a background consumer, not something that answers requests.
  */
 export class ComputeStack extends Stack {
+  public readonly cluster: ecs.Cluster;
   public readonly repository: ecr.Repository;
-  public readonly service: apprunner.Service;
+  public readonly service: ecs.FargateService;
+  public readonly alb: elbv2.ApplicationLoadBalancer;
 
   constructor(scope: Construct, id: string, props: ComputeStackProps) {
     super(scope, id, props);
@@ -33,75 +42,75 @@ export class ComputeStack extends Stack {
       lifecycleRules: [{ maxImageCount: 20 }],
     });
 
-    // App Runner reaches RDS over this VPC connector instead of the public
-    // internet — RDS keeps `publiclyAccessible: false` (see DatabaseStack,
-    // whose security group allows the whole VPC CIDR on 5432 rather than
-    // this specific SG, to avoid a cross-stack dependency cycle).
-    const connectorSecurityGroup = new ec2.SecurityGroup(this, "AppRunnerConnectorSg", {
-      vpc: props.vpc,
-      description: "OPERO App Runner VPC connector",
-      allowAllOutbound: true,
-    });
-
-    const vpcConnector = new apprunner.VpcConnector(this, "VpcConnector", {
-      vpc: props.vpc,
-      vpcSubnets: props.vpc.selectSubnets({ subnetType: ec2.SubnetType.PUBLIC }),
-      securityGroups: [connectorSecurityGroup],
-    });
-
-    const instanceRole = new iam.Role(this, "InstanceRole", {
-      assumedBy: new iam.ServicePrincipal("tasks.apprunner.amazonaws.com"),
-      description: "Permissions the running OPERO web container needs (S3 attachments, its own secrets).",
-    });
-    props.attachmentsBucket.grantReadWrite(instanceRole);
-    props.appSecrets.grantRead(instanceRole);
-    props.dbInstance.secret?.grantRead(instanceRole);
+    this.cluster = new ecs.Cluster(this, "Cluster", { vpc: props.vpc, clusterName: "opero" });
 
     const dbSecret = props.dbInstance.secret;
     if (!dbSecret) {
       throw new Error("DatabaseStack must be created with a generated secret (rds.Credentials.fromGeneratedSecret)");
     }
 
-    this.service = new apprunner.Service(this, "WebService", {
-      serviceName: "opero-web",
-      source: apprunner.Source.fromEcr({
-        repository: this.repository,
-        tagOrDigest: "latest",
-        imageConfiguration: {
-          port: 3000,
-          environmentVariables: {
-            NODE_ENV: "production",
-            PORT: "3000",
-            DB_HOST: props.dbInstance.dbInstanceEndpointAddress,
-            DB_PORT: props.dbInstance.dbInstanceEndpointPort,
-            DB_NAME: "opero",
-            AWS_S3_BUCKET_ATTACHMENTS: props.attachmentsBucket.bucketName,
-            PAYMENT_PROVIDER: "mock", // flip to "asaas" once ASAAS_API_KEY is set for real (PART G)
-          },
-          environmentSecrets: {
-            DB_USERNAME: apprunner.Secret.fromSecretsManager(dbSecret, "username"),
-            DB_PASSWORD: apprunner.Secret.fromSecretsManager(dbSecret, "password"),
-            NEXTAUTH_SECRET: apprunner.Secret.fromSecretsManager(props.appSecrets, "NEXTAUTH_SECRET"),
-            ASAAS_API_KEY: apprunner.Secret.fromSecretsManager(props.appSecrets, "ASAAS_API_KEY"),
-            ASAAS_WEBHOOK_TOKEN: apprunner.Secret.fromSecretsManager(props.appSecrets, "ASAAS_WEBHOOK_TOKEN"),
-          },
-        },
-      }),
-      instanceRole,
-      vpcConnector,
-      autoDeploymentsEnabled: true,
-      cpu: apprunner.Cpu.ONE_VCPU,
-      memory: apprunner.Memory.TWO_GB,
-      healthCheck: apprunner.HealthCheck.http({
-        path: "/api/health",
-        interval: Duration.seconds(10),
+    const taskDefinition = new ecs.FargateTaskDefinition(this, "WebTaskDef", { cpu: 512, memoryLimitMiB: 1024 });
+    props.attachmentsBucket.grantReadWrite(taskDefinition.taskRole);
+    props.appSecrets.grantRead(taskDefinition.taskRole);
+    dbSecret.grantRead(taskDefinition.taskRole);
+    props.remindersQueue.grantSendMessages(taskDefinition.taskRole);
+
+    const container = taskDefinition.addContainer("web", {
+      image: ecs.ContainerImage.fromEcrRepository(this.repository, "latest"),
+      logging: ecs.LogDrivers.awsLogs({ streamPrefix: "opero-web" }),
+      environment: {
+        NODE_ENV: "production",
+        PORT: "3000",
+        DB_HOST: props.dbInstance.dbInstanceEndpointAddress,
+        DB_PORT: props.dbInstance.dbInstanceEndpointPort,
+        DB_NAME: "opero",
+        AWS_S3_BUCKET_ATTACHMENTS: props.attachmentsBucket.bucketName,
+        REDIS_URL: `redis://${props.redisEndpoint}:6379`,
+        SQS_QUEUE_URL_REMINDERS: props.remindersQueue.queueUrl,
+        SQS_QUEUE_URL_BILLING: props.billingQueue.queueUrl,
+        PAYMENT_PROVIDER: "mock", // flip to "asaas" once ASAAS_API_KEY is set for real (PART G)
+      },
+      secrets: {
+        DB_USERNAME: ecs.Secret.fromSecretsManager(dbSecret, "username"),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(dbSecret, "password"),
+        NEXTAUTH_SECRET: ecs.Secret.fromSecretsManager(props.appSecrets, "NEXTAUTH_SECRET"),
+        ASAAS_API_KEY: ecs.Secret.fromSecretsManager(props.appSecrets, "ASAAS_API_KEY"),
+        ASAAS_WEBHOOK_TOKEN: ecs.Secret.fromSecretsManager(props.appSecrets, "ASAAS_WEBHOOK_TOKEN"),
+      },
+      portMappings: [{ containerPort: 3000 }],
+      healthCheck: {
+        command: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/api/health',r=>process.exit(r.statusCode===200?0:1))\""],
+        interval: Duration.seconds(15),
         timeout: Duration.seconds(5),
-        healthyThreshold: 1,
-        unhealthyThreshold: 5,
-      }),
+        retries: 3,
+        startPeriod: Duration.seconds(30),
+      },
     });
 
-    new CfnOutput(this, "ServiceUrl", { value: this.service.serviceUrl });
+    this.service = new ecs.FargateService(this, "WebService", {
+      serviceName: "opero-web",
+      cluster: this.cluster,
+      taskDefinition,
+      desiredCount: 1,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+      circuitBreaker: { rollback: true },
+      // With desiredCount 1, the ECS default (min 50%) would let a
+      // deployment scale down to 0 running tasks before the replacement
+      // is up. This starts the new task first instead.
+      minHealthyPercent: 100,
+      maxHealthyPercent: 200,
+    });
+
+    this.alb = new elbv2.ApplicationLoadBalancer(this, "Alb", { vpc: props.vpc, internetFacing: true });
+    const listener = this.alb.addListener("HttpListener", { port: 80, open: true });
+    listener.addTargets("WebTarget", {
+      port: 3000,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targets: [this.service],
+      healthCheck: { path: "/api/health", interval: Duration.seconds(15), healthyThresholdCount: 2 },
+    });
+
+    new CfnOutput(this, "AlbDnsName", { value: this.alb.loadBalancerDnsName });
     new CfnOutput(this, "EcrRepositoryUri", { value: this.repository.repositoryUri });
   }
 }

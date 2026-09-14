@@ -4,6 +4,7 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { prisma } from "@opero/database";
 import { z } from "zod";
+import { rateLimit } from "./rate-limit";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -47,6 +48,13 @@ export const authOptions: NextAuthOptions = {
         const parsed = credentialsSchema.safeParse(raw);
         if (!parsed.success) return null;
         const { email, password } = parsed.data;
+
+        // Keyed by email (not IP — NextAuth v4's authorize() doesn't
+        // reliably surface the caller's IP behind a load balancer without
+        // extra wiring) so repeated guesses against one account are
+        // throttled regardless of how many IPs they come from.
+        const { allowed } = await rateLimit(`login:${email.toLowerCase()}`, 10, 15 * 60);
+        if (!allowed) return null;
 
         // Email is unique per tenant, not globally — a user identifies
         // their tenant implicitly through which (email, password) pair

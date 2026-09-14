@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "@opero/database";
+import { rateLimit } from "@opero/auth";
 
 const schema = z.object({
   companyName: z.string().min(2),
@@ -15,6 +16,12 @@ const DEFAULT_SERVICE_CATEGORIES = [
 ];
 
 export async function POST(req: Request) {
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const { allowed } = await rateLimit(`register:${ip}`, 5, 60 * 60);
+  if (!allowed) {
+    return NextResponse.json({ error: "Muitas tentativas. Tente novamente mais tarde." }, { status: 429 });
+  }
+
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
