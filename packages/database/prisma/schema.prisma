@@ -67,6 +67,18 @@ enum NotificationStatus {
   FAILED
 }
 
+enum InventoryMovementType {
+  IN
+  OUT
+}
+
+enum NfeStatus {
+  NOT_ISSUED
+  PROCESSING
+  ISSUED
+  FAILED
+}
+
 // ---------------------------------------------------------------------------
 // Tenant & Users
 // ---------------------------------------------------------------------------
@@ -80,15 +92,17 @@ model Tenant {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users            User[]
-  customers        Customer[]
-  serviceCategories ServiceCategory[]
-  serviceOrders    ServiceOrder[]
-  appointments     Appointment[]
-  invoices         Invoice[]
-  transactions     Transaction[]
-  notifications    Notification[]
-  auditLogs        AuditLog[]
+  users              User[]
+  customers          Customer[]
+  serviceCategories  ServiceCategory[]
+  serviceOrders      ServiceOrder[]
+  appointments       Appointment[]
+  invoices           Invoice[]
+  transactions       Transaction[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  inventoryItems     InventoryItem[]
+  inventoryMovements InventoryMovement[]
 
   @@map("tenants")
 }
@@ -131,6 +145,9 @@ model Customer {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  // Self-service scheduling link (PART D.4: /portal-do-cliente/[token]/agendar).
+  publicBookingToken String? @unique @map("public_booking_token")
+
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   serviceOrders ServiceOrder[]
   appointments  Appointment[]
@@ -166,15 +183,19 @@ model ServiceOrder {
   scheduledAt    DateTime?          @map("scheduled_at")
   totalAmount    Decimal            @default(0) @map("total_amount") @db.Decimal(10, 2)
   notes          String?
+  // Public budget-approval link (PART D.4: /portal-do-cliente/[token]/orcamento).
+  publicToken    String?            @unique @map("public_token")
+  approvedAt     DateTime?          @map("approved_at")
   createdAt      DateTime           @default(now()) @map("created_at")
   updatedAt      DateTime           @updatedAt @map("updated_at")
 
-  tenant       Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer     Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  assignedUser User?                @relation("AssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
-  items        ServiceOrderItem[]
-  appointments Appointment[]
-  invoices     Invoice[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer           Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedUser       User?               @relation("AssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  items              ServiceOrderItem[]
+  appointments       Appointment[]
+  invoices           Invoice[]
+  inventoryMovements InventoryMovement[]
 
   @@index([tenantId])
   @@index([tenantId, status])
@@ -182,14 +203,17 @@ model ServiceOrder {
 }
 
 model ServiceOrderItem {
-  id             String               @id @default(cuid())
-  serviceOrderId String               @map("service_order_id")
-  description    String
-  quantity       Decimal              @default(1) @db.Decimal(10, 2)
-  unitPrice      Decimal              @map("unit_price") @db.Decimal(10, 2)
-  type           ServiceOrderItemType @default(SERVICE)
+  id              String               @id @default(cuid())
+  serviceOrderId  String               @map("service_order_id")
+  description     String
+  quantity        Decimal              @default(1) @db.Decimal(10, 2)
+  unitPrice       Decimal              @map("unit_price") @db.Decimal(10, 2)
+  type            ServiceOrderItemType @default(SERVICE)
+  // Set when a PART item was picked from stock — drives inventory consumption.
+  inventoryItemId String?              @map("inventory_item_id")
 
-  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  serviceOrder  ServiceOrder   @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
 
   @@index([serviceOrderId])
   @@map("service_order_items")
@@ -222,19 +246,24 @@ model Appointment {
 // ---------------------------------------------------------------------------
 
 model Invoice {
-  id               String        @id @default(cuid())
-  tenantId         String        @map("tenant_id")
-  serviceOrderId   String?       @map("service_order_id")
-  customerId       String        @map("customer_id")
-  amount           Decimal       @db.Decimal(10, 2)
-  dueDate          DateTime      @map("due_date")
-  status           InvoiceStatus @default(PENDING)
+  id               String         @id @default(cuid())
+  tenantId         String         @map("tenant_id")
+  serviceOrderId   String?        @map("service_order_id")
+  customerId       String         @map("customer_id")
+  amount           Decimal        @db.Decimal(10, 2)
+  dueDate          DateTime       @map("due_date")
+  status           InvoiceStatus  @default(PENDING)
   paymentMethod    PaymentMethod? @map("payment_method")
-  gatewayReference String?       @map("gateway_reference")
-  gatewayProvider  String?       @map("gateway_provider")
-  paymentLinkUrl   String?       @map("payment_link_url")
-  createdAt        DateTime      @default(now()) @map("created_at")
-  updatedAt        DateTime      @updatedAt @map("updated_at")
+  gatewayReference String?        @map("gateway_reference")
+  gatewayProvider  String?        @map("gateway_provider")
+  paymentLinkUrl   String?        @map("payment_link_url")
+  nfeStatus        NfeStatus      @default(NOT_ISSUED) @map("nfe_status")
+  nfeProvider      String?        @map("nfe_provider")
+  nfeReference     String?        @map("nfe_reference")
+  nfeNumber        String?        @map("nfe_number")
+  nfePdfUrl        String?        @map("nfe_pdf_url")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   serviceOrder ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
@@ -248,15 +277,15 @@ model Invoice {
 }
 
 model Transaction {
-  id              String          @id @default(cuid())
-  tenantId        String          @map("tenant_id")
-  type            TransactionType
-  category        String
-  amount          Decimal         @db.Decimal(10, 2)
-  date            DateTime
-  relatedInvoiceId String?        @map("related_invoice_id")
-  description     String?
-  createdAt       DateTime        @default(now()) @map("created_at")
+  id               String          @id @default(cuid())
+  tenantId         String          @map("tenant_id")
+  type             TransactionType
+  category         String
+  amount           Decimal         @db.Decimal(10, 2)
+  date             DateTime
+  relatedInvoiceId String?         @map("related_invoice_id")
+  description      String?
+  createdAt        DateTime        @default(now()) @map("created_at")
 
   tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   relatedInvoice Invoice? @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
@@ -302,4 +331,46 @@ model AuditLog {
   @@index([tenantId])
   @@index([tenantId, entity, entityId])
   @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Estoque (Phase 3)
+// ---------------------------------------------------------------------------
+
+model InventoryItem {
+  id                String   @id @default(cuid())
+  tenantId          String   @map("tenant_id")
+  name              String
+  sku               String?
+  quantity          Decimal  @default(0) @db.Decimal(10, 2)
+  unitCost          Decimal  @default(0) @map("unit_cost") @db.Decimal(10, 2)
+  unitPrice         Decimal  @default(0) @map("unit_price") @db.Decimal(10, 2)
+  lowStockThreshold Decimal  @default(0) @map("low_stock_threshold") @db.Decimal(10, 2)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  movements         InventoryMovement[]
+  serviceOrderItems ServiceOrderItem[]
+
+  @@index([tenantId])
+  @@map("inventory_items")
+}
+
+model InventoryMovement {
+  id                    String                @id @default(cuid())
+  tenantId              String                @map("tenant_id")
+  inventoryItemId       String                @map("inventory_item_id")
+  type                  InventoryMovementType
+  quantity              Decimal               @db.Decimal(10, 2)
+  relatedServiceOrderId String?               @map("related_service_order_id")
+  date                  DateTime              @default(now())
+
+  tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inventoryItem       InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  relatedServiceOrder ServiceOrder? @relation(fields: [relatedServiceOrderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([inventoryItemId])
+  @@map("inventory_movements")
 }

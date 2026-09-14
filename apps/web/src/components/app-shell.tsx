@@ -16,6 +16,7 @@ import {
   Settings,
   LogOut,
   Menu,
+  Boxes,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { href: "/clientes", label: "Clientes", icon: Users, resource: "clientes" },
   { href: "/agenda", label: "Agenda", icon: CalendarDays, resource: "agenda" },
   { href: "/ordens-de-servico", label: "Ordens de Serviço", icon: Wrench, resource: "ordens_de_servico" },
+  { href: "/estoque", label: "Estoque", icon: Boxes, resource: "estoque" },
   { href: "/financeiro/fluxo-de-caixa", label: "Financeiro", icon: Wallet, resource: "financeiro" },
   { href: "/cobrancas", label: "Cobranças", icon: Receipt, resource: "cobrancas" },
   { href: "/equipe", label: "Equipe", icon: UsersRound, resource: "equipe" },

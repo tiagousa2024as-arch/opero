@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { headers } from "next/headers";
 import { requireTenantSession } from "@opero/auth";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@opero/ui";
-import { updateServiceOrderStatusAction } from "../actions";
+import { updateServiceOrderStatusAction, generatePublicTokenAction } from "../actions";
 import type { ServiceOrderStatus } from "@opero/database";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -25,6 +26,10 @@ export default async function OrdemDeServicoDetailPage({ params }: { params: { i
   });
 
   if (!os) notFound();
+
+  const host = headers().get("host");
+  const protocol = host?.startsWith("localhost") ? "http" : "https";
+  const publicUrl = os.publicToken ? `${protocol}://${host}/portal-do-cliente/${os.publicToken}/orcamento` : null;
 
   const history = await db.auditLog.findMany({
     where: { entity: "ServiceOrder", entityId: os.id },
@@ -54,6 +59,13 @@ export default async function OrdemDeServicoDetailPage({ params }: { params: { i
           <Link href={`/ordens-de-servico/${os.id}/editar`}>
             <Button variant="outline">Editar</Button>
           </Link>
+          {!os.publicToken && (
+            <form action={generatePublicTokenAction.bind(null, os.id)}>
+              <Button type="submit" variant="outline">
+                Gerar link do orçamento
+              </Button>
+            </form>
+          )}
           {os.invoices.length === 0 && (
             <Link href={`/cobrancas/novo?serviceOrderId=${os.id}`}>
               <Button>Gerar cobrança</Button>
@@ -61,6 +73,20 @@ export default async function OrdemDeServicoDetailPage({ params }: { params: { i
           )}
         </div>
       </div>
+
+      {publicUrl && (
+        <Card>
+          <CardContent className="space-y-2 p-4 text-sm">
+            <div className="flex items-center gap-2">
+              <p className="font-medium">Link do orçamento para o cliente</p>
+              {os.approvedAt && <Badge variant="success">Aprovado pelo cliente</Badge>}
+            </div>
+            <a href={publicUrl} target="_blank" rel="noreferrer" className="break-all text-primary hover:underline">
+              {publicUrl}
+            </a>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {transitions.map((t) => (

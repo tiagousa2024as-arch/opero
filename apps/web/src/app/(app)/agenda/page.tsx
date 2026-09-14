@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireTenantSession } from "@opero/auth";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@opero/ui";
-import { updateAppointmentStatusAction } from "./actions";
+import { updateAppointmentStatusAction, sendReminderAction } from "./actions";
 
 const STATUS_LABEL: Record<string, string> = {
   SCHEDULED: "Agendado",
@@ -98,6 +98,13 @@ export default async function AgendaPage({ searchParams }: { searchParams: { dat
                         </form>
                       )}
                     </div>
+                    {apt.customer.phone && (
+                      <form action={sendReminderAction.bind(null, apt.id)} className="mt-1">
+                        <button className="text-[10px] text-muted-foreground hover:text-primary hover:underline" type="submit">
+                          Enviar lembrete por WhatsApp
+                        </button>
+                      </form>
+                    )}
                   </div>
                 ))}
               </CardContent>

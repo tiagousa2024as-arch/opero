@@ -6,7 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-  transpilePackages: ["@opero/ui", "@opero/auth", "@opero/database"],
+  transpilePackages: ["@opero/ui", "@opero/auth", "@opero/database", "@opero/notifications"],
   experimental: {
     serverActions: {
       bodySizeLimit: "5mb",

@@ -12,7 +12,8 @@ export type Resource =
   | "financeiro"
   | "cobrancas"
   | "equipe"
-  | "configuracoes";
+  | "configuracoes"
+  | "estoque";
 
 type Action = "read" | "write";
 
@@ -58,6 +59,12 @@ const MATRIX: Record<Resource, Record<UserRole, Action[]>> = {
     ADMIN: ["read", "write"],
     STAFF: [],
     FINANCE: [],
+  },
+  estoque: {
+    OWNER: ["read", "write"],
+    ADMIN: ["read", "write"],
+    STAFF: ["read", "write"],
+    FINANCE: ["read"],
   },
 };
 

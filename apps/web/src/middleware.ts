@@ -12,6 +12,7 @@ const PROTECTED_PREFIXES = [
   "/equipe",
   "/configuracoes",
   "/admin",
+  "/estoque",
 ];
 
 export default withAuth(
@@ -44,5 +45,6 @@ export const config = {
     "/equipe/:path*",
     "/configuracoes/:path*",
     "/admin/:path*",
+    "/estoque/:path*",
   ],
 };

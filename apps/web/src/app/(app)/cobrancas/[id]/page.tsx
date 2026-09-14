@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireTenantSession } from "@opero/auth";
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@opero/ui";
-import { markInvoicePaidAction, cancelInvoiceAction } from "../actions";
+import { markInvoicePaidAction, cancelInvoiceAction, issueNfeAction } from "../actions";
 
 const STATUS_LABEL: Record<string, string> = {
   PAID: "Paga",
@@ -27,6 +27,7 @@ export default async function CobrancaDetailPage({ params }: { params: { id: str
 
   const markPaidWithId = markInvoicePaidAction.bind(null, invoice.id);
   const cancelWithId = cancelInvoiceAction.bind(null, invoice.id);
+  const issueNfeWithId = issueNfeAction.bind(null, invoice.id);
 
   return (
     <div className="max-w-lg space-y-4">
@@ -81,6 +82,32 @@ export default async function CobrancaDetailPage({ params }: { params: { id: str
             </Button>
           </form>
         </div>
+      )}
+
+      {invoice.status === "PAID" && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Nota fiscal</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <Badge variant={invoice.nfeStatus === "ISSUED" ? "success" : invoice.nfeStatus === "FAILED" ? "destructive" : "outline"}>
+              {invoice.nfeStatus === "ISSUED" ? "Emitida" : invoice.nfeStatus === "FAILED" ? "Falhou" : invoice.nfeStatus === "PROCESSING" ? "Processando" : "Não emitida"}
+            </Badge>
+            {invoice.nfeNumber && <p>Número: {invoice.nfeNumber}</p>}
+            {invoice.nfePdfUrl && (
+              <a href={invoice.nfePdfUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline">
+                Ver nota fiscal
+              </a>
+            )}
+            {invoice.nfeStatus !== "ISSUED" && (
+              <form action={issueNfeWithId}>
+                <Button type="submit" size="sm">
+                  Emitir nota fiscal
+                </Button>
+              </form>
+            )}
+          </CardContent>
+        </Card>
       )}
     </div>
   );

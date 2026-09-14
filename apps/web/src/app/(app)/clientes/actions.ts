@@ -46,6 +46,23 @@ export async function updateCustomerAction(customerId: string, formData: FormDat
   redirect(`/clientes/${customerId}`);
 }
 
+/** Generates (or returns the existing) self-service booking link for this customer. */
+export async function generateBookingLinkAction(customerId: string) {
+  const { db, session } = await requireTenantSession();
+  assertCan(session.user.role as any, "clientes", "write");
+
+  const existing = await db.customer.findUniqueOrThrow({ where: { id: customerId }, select: { publicBookingToken: true } });
+  if (!existing.publicBookingToken) {
+    const { randomBytes } = await import("crypto");
+    await db.customer.update({
+      where: { id: customerId },
+      data: { publicBookingToken: randomBytes(16).toString("hex") },
+    });
+  }
+
+  revalidatePath(`/clientes/${customerId}`);
+}
+
 export async function deleteCustomerAction(customerId: string) {
   const { db, session } = await requireTenantSession();
   assertCan(session.user.role as any, "clientes", "write");

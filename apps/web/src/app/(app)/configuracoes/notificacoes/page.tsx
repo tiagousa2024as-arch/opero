@@ -15,9 +15,9 @@ export default async function ConfiguracoesNotificacoesPage() {
             <input type="checkbox" name="emailReminders" defaultChecked={Boolean(settings.emailReminders)} />
             Lembretes de agendamento por email
           </label>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <input type="checkbox" name="whatsappReminders" defaultChecked={Boolean(settings.whatsappReminders)} disabled />
-            Lembretes por WhatsApp <span className="text-xs">(disponível na Fase 2)</span>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" name="whatsappReminders" defaultChecked={Boolean(settings.whatsappReminders)} />
+            Lembretes de agendamento por WhatsApp
           </label>
           <Button type="submit">Salvar</Button>
         </form>

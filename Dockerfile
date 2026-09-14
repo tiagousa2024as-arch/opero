@@ -21,6 +21,7 @@ COPY packages/database/package.json packages/database/package.json
 COPY packages/auth/package.json packages/auth/package.json
 COPY packages/ui/package.json packages/ui/package.json
 COPY packages/config/package.json packages/config/package.json
+COPY packages/notifications/package.json packages/notifications/package.json
 RUN pnpm install --frozen-lockfile
 
 # ---------------------------------------------------------------------------

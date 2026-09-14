@@ -5,9 +5,14 @@ import { ServiceOrderForm } from "../service-order-form";
 
 export default async function NovaOrdemDeServicoPage({ searchParams }: { searchParams: { customerId?: string } }) {
   const { db } = await requireTenantSession();
-  const [customers, users] = await Promise.all([
+  const [customers, users, inventoryItems] = await Promise.all([
     db.customer.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     db.user.findMany({ where: { active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    db.inventoryItem.findMany({
+      where: { quantity: { gt: 0 } },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, unitPrice: true, quantity: true },
+    }),
   ]);
 
   return (
@@ -20,6 +25,7 @@ export default async function NovaOrdemDeServicoPage({ searchParams }: { searchP
           action={createServiceOrderAction}
           customers={customers}
           users={users}
+          inventoryItems={inventoryItems.map((i) => ({ ...i, unitPrice: Number(i.unitPrice), quantity: Number(i.quantity) }))}
           defaultValues={{ customerId: searchParams.customerId }}
         />
       </CardContent>

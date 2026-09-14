@@ -12,6 +12,7 @@ const ALL_RESOURCES: Resource[] = [
   "cobrancas",
   "equipe",
   "configuracoes",
+  "estoque",
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

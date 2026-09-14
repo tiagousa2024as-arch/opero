@@ -4,9 +4,16 @@ import { useMemo, useState } from "react";
 import { Button, Input, Label, Select, Textarea, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@opero/ui";
 import { Trash2 } from "lucide-react";
 
-type Item = { description: string; quantity: number; unitPrice: number; type: "SERVICE" | "PART" };
+type Item = {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  type: "SERVICE" | "PART";
+  inventoryItemId?: string | null;
+};
 
 type Option = { id: string; name: string };
+type InventoryOption = { id: string; name: string; unitPrice: number; quantity: number };
 
 function formatBRL(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
@@ -16,11 +23,13 @@ export function ServiceOrderForm({
   action,
   customers,
   users,
+  inventoryItems = [],
   defaultValues,
 }: {
   action: (formData: FormData) => void;
   customers: Option[];
   users: Option[];
+  inventoryItems?: InventoryOption[];
   defaultValues?: {
     customerId?: string;
     assignedUserId?: string | null;
@@ -30,14 +39,24 @@ export function ServiceOrderForm({
   };
 }) {
   const [items, setItems] = useState<Item[]>(defaultValues?.items?.length ? defaultValues.items : []);
-  const [draft, setDraft] = useState<Item>({ description: "", quantity: 1, unitPrice: 0, type: "SERVICE" });
+  const [draft, setDraft] = useState<Item>({ description: "", quantity: 1, unitPrice: 0, type: "SERVICE", inventoryItemId: null });
 
   const total = useMemo(() => items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0), [items]);
 
   function addItem() {
     if (!draft.description.trim() || draft.quantity <= 0) return;
     setItems((prev) => [...prev, draft]);
-    setDraft({ description: "", quantity: 1, unitPrice: 0, type: "SERVICE" });
+    setDraft({ description: "", quantity: 1, unitPrice: 0, type: "SERVICE", inventoryItemId: null });
+  }
+
+  function selectInventoryItem(inventoryItemId: string) {
+    if (!inventoryItemId) {
+      setDraft((d) => ({ ...d, inventoryItemId: null }));
+      return;
+    }
+    const stock = inventoryItems.find((i) => i.id === inventoryItemId);
+    if (!stock) return;
+    setDraft((d) => ({ ...d, inventoryItemId, description: stock.name, unitPrice: stock.unitPrice }));
   }
 
   function removeItem(index: number) {
@@ -98,6 +117,7 @@ export function ServiceOrderForm({
               <TableRow>
                 <TableHead>Descrição</TableHead>
                 <TableHead>Tipo</TableHead>
+                <TableHead>Estoque</TableHead>
                 <TableHead>Qtd</TableHead>
                 <TableHead>Valor unit.</TableHead>
                 <TableHead>Subtotal</TableHead>
@@ -109,6 +129,7 @@ export function ServiceOrderForm({
                 <TableRow key={i}>
                   <TableCell>{item.description}</TableCell>
                   <TableCell>{item.type === "PART" ? "Peça" : "Serviço"}</TableCell>
+                  <TableCell>{item.inventoryItemId ? "Sim" : "—"}</TableCell>
                   <TableCell>{item.quantity}</TableCell>
                   <TableCell>{formatBRL(item.unitPrice)}</TableCell>
                   <TableCell>{formatBRL(item.quantity * item.unitPrice)}</TableCell>
@@ -123,13 +144,27 @@ export function ServiceOrderForm({
           </Table>
         )}
 
+        {draft.type === "PART" && inventoryItems.length > 0 && (
+          <div className="space-y-1">
+            <Label htmlFor="draft-inventory">Peça do estoque (opcional)</Label>
+            <Select id="draft-inventory" value={draft.inventoryItemId ?? ""} onChange={(e) => selectInventoryItem(e.target.value)}>
+              <option value="">Digitar manualmente</option>
+              {inventoryItems.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name} ({i.quantity} em estoque)
+                </option>
+              ))}
+            </Select>
+          </div>
+        )}
+
         <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_1fr_auto] sm:items-end">
           <div className="space-y-1">
             <Label htmlFor="draft-description">Descrição</Label>
             <Input
               id="draft-description"
               value={draft.description}
-              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value, inventoryItemId: null }))}
             />
           </div>
           <div className="space-y-1">
@@ -137,7 +172,7 @@ export function ServiceOrderForm({
             <Select
               id="draft-type"
               value={draft.type}
-              onChange={(e) => setDraft((d) => ({ ...d, type: e.target.value as Item["type"] }))}
+              onChange={(e) => setDraft((d) => ({ ...d, type: e.target.value as Item["type"], inventoryItemId: null }))}
             >
               <option value="SERVICE">Serviço</option>
               <option value="PART">Peça</option>

@@ -5,6 +5,8 @@ const TABS = [
   { href: "/configuracoes/servicos", label: "Serviços" },
   { href: "/configuracoes/pagamentos", label: "Pagamentos" },
   { href: "/configuracoes/notificacoes", label: "Notificações" },
+  { href: "/configuracoes/whatsapp", label: "WhatsApp" },
+  { href: "/configuracoes/nota-fiscal", label: "Nota fiscal" },
   { href: "/configuracoes/plano-e-cobranca", label: "Plano e cobrança" },
   { href: "/configuracoes/usuario", label: "Meu perfil" },
 ];

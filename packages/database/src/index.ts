@@ -53,6 +53,8 @@ const TENANT_SCOPED_MODELS = new Set([
   "Transaction",
   "Notification",
   "AuditLog",
+  "InventoryItem",
+  "InventoryMovement",
 ]);
 
 const READ_OPS = new Set(["findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow", "findMany", "count", "aggregate", "groupBy"]);
