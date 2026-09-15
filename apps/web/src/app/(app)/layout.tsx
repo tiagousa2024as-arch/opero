@@ -13,6 +13,9 @@ const ALL_RESOURCES: Resource[] = [
   "equipe",
   "configuracoes",
   "estoque",
+  "filiais",
+  "comissoes",
+  "integracoes",
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -25,9 +28,17 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const allowedResources = new Set(ALL_RESOURCES.filter((r) => can(role, r, "read")));
 
   const tenant = await prisma.tenant.findUnique({ where: { id: session.user.tenantId } });
+  const settings = (tenant?.settings as Record<string, string>) ?? {};
 
   return (
-    <AppShell userName={session.user.name} tenantName={tenant?.name ?? ""} allowedResources={allowedResources}>
+    <AppShell
+      userName={session.user.name}
+      tenantName={tenant?.name ?? ""}
+      allowedResources={allowedResources}
+      brandName={settings.brandName}
+      brandLogoUrl={settings.logoUrl}
+      primaryColorHex={settings.primaryColorHex}
+    >
       {children}
     </AppShell>
   );

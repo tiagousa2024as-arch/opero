@@ -7,7 +7,10 @@ const TABS = [
   { href: "/configuracoes/notificacoes", label: "Notificações" },
   { href: "/configuracoes/whatsapp", label: "WhatsApp" },
   { href: "/configuracoes/nota-fiscal", label: "Nota fiscal" },
+  { href: "/configuracoes/integracoes", label: "Integrações" },
+  { href: "/configuracoes/marca-branca", label: "Marca" },
   { href: "/configuracoes/plano-e-cobranca", label: "Plano e cobrança" },
+  { href: "/configuracoes/seguranca", label: "Segurança" },
   { href: "/configuracoes/usuario", label: "Meu perfil" },
 ];
 

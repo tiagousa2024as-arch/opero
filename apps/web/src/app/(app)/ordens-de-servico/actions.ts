@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireTenantSession, assertCan } from "@opero/auth";
+import { dispatchWebhookEvent } from "@/lib/webhooks";
 import type { ServiceOrderItemType, ServiceOrderStatus } from "@opero/database";
 
 type ItemInput = {
@@ -141,7 +142,10 @@ export async function updateServiceOrderStatusAction(serviceOrderId: string, sta
   const { db, session } = await requireTenantSession();
   assertCan(session.user.role as any, "ordens_de_servico", "write");
 
-  const previous = await db.serviceOrder.findUniqueOrThrow({ where: { id: serviceOrderId }, select: { status: true } });
+  const previous = await db.serviceOrder.findUniqueOrThrow({
+    where: { id: serviceOrderId },
+    select: { status: true, assignedUser: true, totalAmount: true },
+  });
   await db.serviceOrder.update({ where: { id: serviceOrderId }, data: { status } });
 
   await db.auditLog.create({
@@ -154,6 +158,27 @@ export async function updateServiceOrderStatusAction(serviceOrderId: string, sta
       metadata: { from: previous.status, to: status },
     },
   });
+
+  // Auto-generate a commission the first time an OS reaches DONE, if its
+  // assigned staff member has a commission percentage configured.
+  // Commission.serviceOrderId is unique, so re-marking DONE (e.g. DONE ->
+  // IN_PROGRESS -> DONE) never creates a duplicate.
+  if (status === "DONE" && previous.assignedUser?.commissionPercentage) {
+    const percentage = Number(previous.assignedUser.commissionPercentage);
+    await db.commission
+      .create({
+        data: {
+          tenantId: session.user.tenantId,
+          userId: previous.assignedUser.id,
+          serviceOrderId,
+          percentage,
+          amount: (Number(previous.totalAmount) * percentage) / 100,
+        },
+      })
+      .catch(() => {}); // unique constraint violation if a commission already exists — fine, ignore
+  }
+
+  await dispatchWebhookEvent(db, "service_order.status_changed", { serviceOrderId, from: previous.status, to: status });
 
   revalidatePath(`/ordens-de-servico/${serviceOrderId}`);
   revalidatePath("/ordens-de-servico");

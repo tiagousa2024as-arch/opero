@@ -55,6 +55,10 @@ const TENANT_SCOPED_MODELS = new Set([
   "AuditLog",
   "InventoryItem",
   "InventoryMovement",
+  "Branch",
+  "Commission",
+  "ApiKey",
+  "Webhook",
 ]);
 
 const READ_OPS = new Set(["findFirst", "findFirstOrThrow", "findUnique", "findUniqueOrThrow", "findMany", "count", "aggregate", "groupBy"]);

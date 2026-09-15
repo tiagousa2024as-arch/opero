@@ -17,8 +17,11 @@ import {
   LogOut,
   Menu,
   Boxes,
+  Building2,
+  Percent,
 } from "lucide-react";
 import { useState } from "react";
+import { hexToHslTriplet } from "@/lib/hex-to-hsl";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Painel", icon: LayoutDashboard, resource: null },
@@ -28,6 +31,8 @@ const NAV_ITEMS = [
   { href: "/estoque", label: "Estoque", icon: Boxes, resource: "estoque" },
   { href: "/financeiro/fluxo-de-caixa", label: "Financeiro", icon: Wallet, resource: "financeiro" },
   { href: "/cobrancas", label: "Cobranças", icon: Receipt, resource: "cobrancas" },
+  { href: "/filiais", label: "Filiais", icon: Building2, resource: "filiais" },
+  { href: "/comissoes", label: "Comissões", icon: Percent, resource: "comissoes" },
   { href: "/equipe", label: "Equipe", icon: UsersRound, resource: "equipe" },
   { href: "/configuracoes/empresa", label: "Configurações", icon: Settings, resource: "configuracoes" },
 ] as const;
@@ -37,16 +42,31 @@ export function AppShell({
   userName,
   tenantName,
   allowedResources,
+  brandName,
+  brandLogoUrl,
+  primaryColorHex,
 }: {
   children: React.ReactNode;
   userName: string;
   tenantName: string;
   allowedResources: Set<string>;
+  brandName?: string;
+  brandLogoUrl?: string;
+  primaryColorHex?: string;
 }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const items = NAV_ITEMS.filter((item) => !item.resource || allowedResources.has(item.resource));
+  const displayName = brandName || "OPERO";
+  const primaryHsl = primaryColorHex ? hexToHslTriplet(primaryColorHex) : null;
+
+  const brandMark = brandLogoUrl ? (
+    // eslint-disable-next-line @next/next/no-img-element -- tenant-supplied external URL, not a local asset Next can optimize
+    <img src={brandLogoUrl} alt={displayName} className="h-6 max-w-[8rem] object-contain" />
+  ) : (
+    <span className="font-bold text-primary">{displayName}</span>
+  );
 
   const nav = (
     <nav className="flex flex-col gap-1 p-3">
@@ -72,9 +92,12 @@ export function AppShell({
   );
 
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
+    <div
+      className="flex min-h-screen flex-col md:flex-row"
+      style={primaryHsl ? ({ "--primary": primaryHsl, "--ring": primaryHsl } as React.CSSProperties) : undefined}
+    >
       <aside className="hidden w-64 shrink-0 border-r bg-background md:block">
-        <div className="flex h-14 items-center border-b px-4 font-bold text-primary">OPERO</div>
+        <div className="flex h-14 items-center border-b px-4">{brandMark}</div>
         {nav}
       </aside>
 
@@ -84,7 +107,7 @@ export function AppShell({
             <button onClick={() => setMobileOpen((v) => !v)} aria-label="Abrir menu">
               <Menu className="h-5 w-5" />
             </button>
-            <span className="font-bold text-primary">OPERO</span>
+            {brandMark}
           </div>
           <div className="hidden text-sm text-muted-foreground md:block">{tenantName}</div>
           <div className="flex items-center gap-3">

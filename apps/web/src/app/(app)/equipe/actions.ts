@@ -33,8 +33,19 @@ export async function updateTeamMemberAction(userId: string, formData: FormData)
   const name = String(formData.get("name") ?? "").trim();
   const role = String(formData.get("role") ?? "STAFF") as UserRole;
   const active = formData.get("active") === "on";
+  const branchId = String(formData.get("branchId") ?? "") || null;
+  const commissionPercentageRaw = String(formData.get("commissionPercentage") ?? "").trim();
 
-  await db.user.update({ where: { id: userId }, data: { name, role, active } });
+  await db.user.update({
+    where: { id: userId },
+    data: {
+      name,
+      role,
+      active,
+      branchId,
+      commissionPercentage: commissionPercentageRaw ? Number(commissionPercentageRaw) : null,
+    },
+  });
 
   revalidatePath("/equipe");
   revalidatePath(`/equipe/${userId}`);

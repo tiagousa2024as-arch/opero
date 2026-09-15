@@ -22,11 +22,22 @@ const env: cdk.Environment = {
   region: process.env.CDK_DEFAULT_REGION ?? "sa-east-1",
 };
 
-const stackProps = { env, tags: { project: "opero", phase: "3" } };
+const stackProps = { env, tags: { project: "opero", phase: "4" } };
+
+// PART F Phase 4 flags — see cdk.json for why these default false.
+const enableMultiAz = Boolean(app.node.tryGetContext("enableMultiAz"));
+const enableReadReplica = Boolean(app.node.tryGetContext("enableReadReplica"));
+const enableWaf = Boolean(app.node.tryGetContext("enableWaf"));
+const enableBlueGreen = Boolean(app.node.tryGetContext("enableBlueGreen"));
 
 const network = new NetworkStack(app, "Opero-Network", stackProps);
 
-const database = new DatabaseStack(app, "Opero-Database", { ...stackProps, vpc: network.vpc });
+const database = new DatabaseStack(app, "Opero-Database", {
+  ...stackProps,
+  vpc: network.vpc,
+  enableMultiAz,
+  enableReadReplica,
+});
 
 const storage = new StorageStack(app, "Opero-Storage", stackProps);
 
@@ -47,6 +58,8 @@ const compute = new ComputeStack(app, "Opero-Compute", {
   redisEndpoint: cache.cluster.attrRedisEndpointAddress,
   remindersQueue: queues.remindersQueue,
   billingQueue: queues.billingQueue,
+  enableWaf,
+  enableBlueGreen,
 });
 
 const worker = new WorkerStack(app, "Opero-Worker", {

@@ -1,6 +1,6 @@
-# infra — AWS CDK (Phase 2-3)
+# infra — AWS CDK (Phase 2-4)
 
-TypeScript CDK app implementing PART F Phase 2 (production deployment) and Phase 3 (ECS/Redis/SQS scale-up) of the blueprint, as real, synthesizable infrastructure-as-code — `cdk synth` runs clean with zero warnings across all 10 stacks. **Nothing has been deployed** — that needs a real AWS account with billing configured (PART G), which this session doesn't have.
+TypeScript CDK app implementing PART F Phase 2 (production deployment), Phase 3 (ECS/Redis/SQS scale-up) and Phase 4 (Multi-AZ/read replica/WAF/blue-green — all behind off-by-default flags, see below) of the blueprint, as real, synthesizable infrastructure-as-code — `cdk synth` runs clean with zero warnings across all 10 stacks, with every Phase 4 flag both on and off. **Nothing has been deployed** — that needs a real AWS account with billing configured (PART G), which this session doesn't have.
 
 ## Stacks
 
@@ -18,6 +18,8 @@ TypeScript CDK app implementing PART F Phase 2 (production deployment) and Phase
 | `Opero-Observability` | CloudWatch alarms: RDS CPU/storage, ECS running-task-count for both services, ALB target 5xx rate |
 
 This supersedes the Phase 1/2 App Runner-based compute (public-subnets-only VPC, no NAT, no Redis/SQS) — see git history if you need to see that version. Real infra evolves forward; it isn't worth maintaining two parallel copies for different growth stages.
+
+**On EventBridge:** PART B/F mention EventBridge for scheduled jobs alongside SQS. `Opero-Worker`'s service runs a long-lived process with its own in-process interval scheduler (apps/worker/src/scheduler.ts) instead — it already pays for a continuously-running container to consume SQS, so an in-process timer is simpler than an EventBridge Scheduled Rule triggering a one-off ECS `RunTask`, for the same outcome. Switch to the EventBridge+RunTask pattern if the worker ever becomes idle enough that keeping it always-on stops being worth it.
 
 ## Before the first real deploy
 
@@ -42,6 +44,21 @@ pnpm --filter @opero/infra diff    # needs real AWS credentials
 pnpm --filter @opero/infra deploy  # needs real AWS credentials — this is the one that costs money
 ```
 
-## Not built yet (Phase 4, PART F)
+## Phase 4 flags (PART F): Multi-AZ, read replica, WAF, blue/green
 
-Multi-AZ RDS, a read replica, AWS WAF in front of the ALB, and blue/green deploys via CodeDeploy — don't add these pre-emptively; they're real ongoing cost the blueprint explicitly times to when there's a revenue signal to justify them.
+Built and verified via `cdk synth` with every combination, but **off by default** — PART F is explicit that this tier of work should turn on "only when a real customer/revenue signal justifies it," and each of these is real ongoing AWS cost (Multi-AZ and the read replica each roughly double the RDS bill; WAF and CodeDeploy are smaller but non-zero). Flip them in `cdk.json`'s context, not by hardcoding `true` in a stack:
+
+```json
+{ "context": { "enableMultiAz": true, "enableReadReplica": true, "enableWaf": true, "enableBlueGreen": true } }
+```
+
+or per-command: `cdk deploy -c enableMultiAz=true ...`.
+
+- `enableMultiAz` — `Opero-Database`'s RDS instance becomes Multi-AZ.
+- `enableReadReplica` — adds a read replica off the primary. **Not yet wired at the application layer**: `packages/database` has no notion of a replica connection, so reporting queries don't route to it yet — provisioning it now is ahead of the code that would use it.
+- `enableWaf` — attaches an AWS-managed WAFv2 Web ACL (common rule set + known-bad-inputs rule set) to the ALB.
+- `enableBlueGreen` — switches `Opero-Compute`'s ECS service to a CodeDeploy-controlled deployment (blue/green target groups on the ALB) instead of ECS's native rolling update. **`.github/workflows/deploy.yml` does not create CodeDeploy deployments** — it still calls `aws ecs update-service --force-new-deployment`, which is the right call for the default (non-blue/green) path but a no-op/wrong call once a service is CodeDeploy-controlled. Update that workflow step to call `aws deploy create-deployment` instead if this flag is ever turned on.
+
+## Optional, not built (PART F Phase 4, "only if an enterprise customer requires it")
+
+SSO/SAML — `/configuracoes/seguranca` in the app explains this is available on request but doesn't implement a real identity-provider integration, since that needs an actual customer's Okta/Azure AD/Google Workspace metadata to configure against, not something to build speculatively.

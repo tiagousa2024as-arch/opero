@@ -48,6 +48,12 @@
     "@aws-cdk/aws-s3:eventBridgeNotificationApiVersion": true,
     "@aws-cdk/core:defaultCrossStackReferences": "strong",
     "environment": "dev",
-    "tenantAppName": "opero"
+    "tenantAppName": "opero",
+
+    "_comment_phase4": "PART F Phase 4 flags — all default false; see infra/README.md before flipping any to true (each adds real ongoing AWS cost and the blueprint is explicit these are 'only when a real customer/revenue signal justifies it').",
+    "enableMultiAz": false,
+    "enableReadReplica": false,
+    "enableWaf": false,
+    "enableBlueGreen": false
   }
 }

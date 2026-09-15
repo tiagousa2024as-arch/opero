@@ -13,7 +13,10 @@ export type Resource =
   | "cobrancas"
   | "equipe"
   | "configuracoes"
-  | "estoque";
+  | "estoque"
+  | "filiais"
+  | "comissoes"
+  | "integracoes";
 
 type Action = "read" | "write";
 
@@ -65,6 +68,24 @@ const MATRIX: Record<Resource, Record<UserRole, Action[]>> = {
     ADMIN: ["read", "write"],
     STAFF: ["read", "write"],
     FINANCE: ["read"],
+  },
+  filiais: {
+    OWNER: ["read", "write"],
+    ADMIN: ["read", "write"],
+    STAFF: [],
+    FINANCE: ["read"],
+  },
+  comissoes: {
+    OWNER: ["read", "write"],
+    ADMIN: ["read", "write"],
+    STAFF: [],
+    FINANCE: ["read", "write"],
+  },
+  integracoes: {
+    OWNER: ["read", "write"],
+    ADMIN: ["read", "write"],
+    STAFF: [],
+    FINANCE: [],
   },
 };
 

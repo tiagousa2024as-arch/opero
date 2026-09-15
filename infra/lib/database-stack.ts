@@ -5,17 +5,24 @@ import type { Construct } from "constructs";
 
 export interface DatabaseStackProps extends StackProps {
   vpc: ec2.IVpc;
+  /** PART F Phase 4 — off by default; see infra/README.md before flipping it on. */
+  enableMultiAz?: boolean;
+  /** PART F Phase 4 — off by default; see infra/README.md before flipping it on. */
+  enableReadReplica?: boolean;
 }
 
 /**
- * Single-instance, single-AZ Postgres for Phase 1-3 (PART B: multi-AZ and
- * a read replica are Phase 4 work — don't add them here pre-emptively).
- * Phase 3 (PART F) moves it into the private subnet introduced in
- * NetworkStack, with a bastion host for admin access over SSM (no open
- * SSH port, no keypair to manage or leak).
+ * Single-instance Postgres. Multi-AZ and a read replica (PART B/F Phase
+ * 4) are built here but gated behind `enableMultiAz`/`enableReadReplica`
+ * (both default false, wired from cdk.json context in bin/opero.ts) —
+ * PART F is explicit that Phase 4 work should turn on "only when a real
+ * customer/revenue signal justifies it", and both of these roughly
+ * double the RDS bill. Flip them on in cdk.json once that's true, not by
+ * hardcoding `true` here.
  */
 export class DatabaseStack extends Stack {
   public readonly instance: rds.DatabaseInstance;
+  public readonly readReplica?: rds.DatabaseInstanceReadReplica;
   public readonly securityGroup: ec2.SecurityGroup;
 
   constructor(scope: Construct, id: string, props: DatabaseStackProps) {
@@ -45,7 +52,7 @@ export class DatabaseStack extends Stack {
       credentials: rds.Credentials.fromGeneratedSecret("opero_admin"),
       allocatedStorage: 20,
       maxAllocatedStorage: 100,
-      multiAz: false,
+      multiAz: props.enableMultiAz ?? false,
       storageEncrypted: true,
       backupRetention: Duration.days(7),
       deleteAutomatedBackups: true,
@@ -54,6 +61,23 @@ export class DatabaseStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
       deletionProtection: true,
     });
+
+    if (props.enableReadReplica) {
+      // For reporting queries (PART B) — the app doesn't route any reads
+      // to this yet; see infra/README.md for the gap. Same instance
+      // class/subnet/security posture as the primary.
+      this.readReplica = new rds.DatabaseInstanceReadReplica(this, "PostgresReadReplica", {
+        sourceDatabaseInstance: this.instance,
+        instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE4_GRAVITON, ec2.InstanceSize.MICRO),
+        vpc: props.vpc,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        securityGroups: [this.securityGroup],
+        publiclyAccessible: false,
+        // storageEncrypted deliberately omitted: a read replica always
+        // inherits encryption from its source instance, and CloudFormation
+        // rejects setting it explicitly alongside SourceDBInstanceIdentifier.
+      });
+    }
 
     // Admin access: `aws ssm start-session --target <instance-id>` then
     // tunnel Postgres through it (`aws ssm start-session ... --document-name

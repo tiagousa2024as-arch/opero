@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@opero/auth";
@@ -18,8 +19,16 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
   return (
     <div className="min-h-screen bg-muted/20">
-      <header className="border-b bg-background px-6 py-4">
+      <header className="flex items-center gap-6 border-b bg-background px-6 py-4">
         <span className="font-bold text-primary">OPERO Admin</span>
+        <nav className="flex gap-4 text-sm text-muted-foreground">
+          <Link href="/admin/tenants" className="hover:text-foreground">
+            Empresas
+          </Link>
+          <Link href="/admin/auditoria" className="hover:text-foreground">
+            Auditoria
+          </Link>
+        </nav>
       </header>
       <main className="p-6">{children}</main>
     </div>

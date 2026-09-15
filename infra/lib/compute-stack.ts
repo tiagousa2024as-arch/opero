@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, Stack, type StackProps } from "aws-cdk-lib";
+import { Annotations, CfnOutput, Duration, Stack, type StackProps } from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecs from "aws-cdk-lib/aws-ecs";
 import * as ecr from "aws-cdk-lib/aws-ecr";
@@ -7,6 +7,8 @@ import * as rds from "aws-cdk-lib/aws-rds";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as secretsmanager from "aws-cdk-lib/aws-secretsmanager";
 import * as sqs from "aws-cdk-lib/aws-sqs";
+import * as wafv2 from "aws-cdk-lib/aws-wafv2";
+import * as codedeploy from "aws-cdk-lib/aws-codedeploy";
 import type { Construct } from "constructs";
 
 export interface ComputeStackProps extends StackProps {
@@ -17,6 +19,10 @@ export interface ComputeStackProps extends StackProps {
   redisEndpoint: string;
   remindersQueue: sqs.Queue;
   billingQueue: sqs.Queue;
+  /** PART F Phase 4 — off by default; see infra/README.md before flipping it on. */
+  enableWaf?: boolean;
+  /** PART F Phase 4 — off by default; see infra/README.md before flipping it on. */
+  enableBlueGreen?: boolean;
 }
 
 /**
@@ -26,6 +32,10 @@ export interface ComputeStackProps extends StackProps {
  * cluster with the worker service, Redis reachability. `apps/worker` gets
  * its own service in this same cluster (see WorkerStack) with no ALB,
  * since it's a background consumer, not something that answers requests.
+ *
+ * `enableWaf` and `enableBlueGreen` are Phase 4 (PART F) additions, gated
+ * off by default the same way DatabaseStack gates Multi-AZ/read-replica —
+ * see that file's comment for why.
  */
 export class ComputeStack extends Stack {
   public readonly cluster: ecs.Cluster;
@@ -87,28 +97,127 @@ export class ComputeStack extends Stack {
       },
     });
 
-    this.service = new ecs.FargateService(this, "WebService", {
-      serviceName: "opero-web",
-      cluster: this.cluster,
-      taskDefinition,
-      desiredCount: 1,
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      circuitBreaker: { rollback: true },
-      // With desiredCount 1, the ECS default (min 50%) would let a
-      // deployment scale down to 0 running tasks before the replacement
-      // is up. This starts the new task first instead.
-      minHealthyPercent: 100,
-      maxHealthyPercent: 200,
-    });
-
     this.alb = new elbv2.ApplicationLoadBalancer(this, "Alb", { vpc: props.vpc, internetFacing: true });
-    const listener = this.alb.addListener("HttpListener", { port: 80, open: true });
-    listener.addTargets("WebTarget", {
-      port: 3000,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      targets: [this.service],
-      healthCheck: { path: "/api/health", interval: Duration.seconds(15), healthyThresholdCount: 2 },
-    });
+
+    if (props.enableBlueGreen) {
+      // CodeDeploy blue/green: the service's deployment controller hands
+      // target-group registration to CodeDeploy instead of ECS's own
+      // rolling update, so the service is wired to the blue target group
+      // directly via `loadBalancers` rather than the usual
+      // `listener.addTargets(...)` helper (which assumes ECS_NATIVE).
+      const blueTargetGroup = new elbv2.ApplicationTargetGroup(this, "BlueTargetGroup", {
+        vpc: props.vpc,
+        port: 3000,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        targetType: elbv2.TargetType.IP,
+        healthCheck: { path: "/api/health", interval: Duration.seconds(15), healthyThresholdCount: 2 },
+      });
+      const greenTargetGroup = new elbv2.ApplicationTargetGroup(this, "GreenTargetGroup", {
+        vpc: props.vpc,
+        port: 3000,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        targetType: elbv2.TargetType.IP,
+        healthCheck: { path: "/api/health", interval: Duration.seconds(15), healthyThresholdCount: 2 },
+      });
+      const listener = this.alb.addListener("HttpListener", {
+        port: 80,
+        open: true,
+        defaultTargetGroups: [blueTargetGroup],
+      });
+
+      this.service = new ecs.FargateService(this, "WebService", {
+        serviceName: "opero-web",
+        cluster: this.cluster,
+        taskDefinition,
+        desiredCount: 1,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        deploymentController: { type: ecs.DeploymentControllerType.CODE_DEPLOY },
+        // minHealthyPercent/maxHealthyPercent/circuitBreaker are ECS-native
+        // rolling-update settings — meaningless once CodeDeploy owns the
+        // deployment, so they're intentionally left unset here.
+      });
+      Annotations.of(this.service).acknowledgeWarning(
+        "@aws-cdk/aws-ecs:minHealthyPercent",
+        "Deployment is owned by CodeDeploy (deploymentController: CODE_DEPLOY) — ECS's own rolling-update minHealthyPercent/maxHealthyPercent don't apply.",
+      );
+      this.service.attachToApplicationTargetGroup(blueTargetGroup);
+
+      const application = new codedeploy.EcsApplication(this, "WebCodeDeployApp", { applicationName: "opero-web" });
+      new codedeploy.EcsDeploymentGroup(this, "WebDeploymentGroup", {
+        application,
+        service: this.service,
+        deploymentGroupName: "opero-web",
+        blueGreenDeploymentConfig: {
+          blueTargetGroup,
+          greenTargetGroup,
+          listener,
+        },
+        deploymentConfig: codedeploy.EcsDeploymentConfig.ALL_AT_ONCE,
+      });
+    } else {
+      this.service = new ecs.FargateService(this, "WebService", {
+        serviceName: "opero-web",
+        cluster: this.cluster,
+        taskDefinition,
+        desiredCount: 1,
+        vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+        circuitBreaker: { rollback: true },
+        // With desiredCount 1, the ECS default (min 50%) would let a
+        // deployment scale down to 0 running tasks before the replacement
+        // is up. This starts the new task first instead.
+        minHealthyPercent: 100,
+        maxHealthyPercent: 200,
+      });
+
+      const listener = this.alb.addListener("HttpListener", { port: 80, open: true });
+      listener.addTargets("WebTarget", {
+        port: 3000,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        targets: [this.service],
+        healthCheck: { path: "/api/health", interval: Duration.seconds(15), healthyThresholdCount: 2 },
+      });
+    }
+
+    if (props.enableWaf) {
+      const webAcl = new wafv2.CfnWebACL(this, "WebAcl", {
+        scope: "REGIONAL",
+        defaultAction: { allow: {} },
+        visibilityConfig: {
+          sampledRequestsEnabled: true,
+          cloudWatchMetricsEnabled: true,
+          metricName: "opero-web-waf",
+        },
+        rules: [
+          {
+            name: "AWS-AWSManagedRulesCommonRuleSet",
+            priority: 0,
+            overrideAction: { none: {} },
+            statement: { managedRuleGroupStatement: { vendorName: "AWS", name: "AWSManagedRulesCommonRuleSet" } },
+            visibilityConfig: {
+              sampledRequestsEnabled: true,
+              cloudWatchMetricsEnabled: true,
+              metricName: "opero-web-common-rules",
+            },
+          },
+          {
+            name: "AWS-AWSManagedRulesKnownBadInputsRuleSet",
+            priority: 1,
+            overrideAction: { none: {} },
+            statement: { managedRuleGroupStatement: { vendorName: "AWS", name: "AWSManagedRulesKnownBadInputsRuleSet" } },
+            visibilityConfig: {
+              sampledRequestsEnabled: true,
+              cloudWatchMetricsEnabled: true,
+              metricName: "opero-web-bad-inputs",
+            },
+          },
+        ],
+      });
+
+      new wafv2.CfnWebACLAssociation(this, "WebAclAssociation", {
+        resourceArn: this.alb.loadBalancerArn,
+        webAclArn: webAcl.attrArn,
+      });
+    }
 
     new CfnOutput(this, "AlbDnsName", { value: this.alb.loadBalancerDnsName });
     new CfnOutput(this, "EcrRepositoryUri", { value: this.repository.repositoryUri });

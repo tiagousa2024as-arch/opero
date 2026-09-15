@@ -11,7 +11,10 @@ export default async function MembroDetailPage({
   searchParams: { tempPassword?: string };
 }) {
   const { db } = await requireTenantSession();
-  const user = await db.user.findUnique({ where: { id: params.id } });
+  const [user, branches] = await Promise.all([
+    db.user.findUnique({ where: { id: params.id } }),
+    db.branch.findMany({ where: { active: true }, orderBy: { name: "asc" } }),
+  ]);
   if (!user) notFound();
 
   const updateWithId = updateTeamMemberAction.bind(null, user.id);
@@ -45,6 +48,32 @@ export default async function MembroDetailPage({
               <option value="STAFF">Atendente</option>
               <option value="FINANCE">Financeiro</option>
             </Select>
+          </div>
+          {branches.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="branchId">Filial</Label>
+              <Select id="branchId" name="branchId" defaultValue={user.branchId ?? ""}>
+                <option value="">Sem filial</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="commissionPercentage">Comissão (% sobre OS concluídas)</Label>
+            <Input
+              id="commissionPercentage"
+              name="commissionPercentage"
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              defaultValue={user.commissionPercentage ? Number(user.commissionPercentage) : ""}
+              placeholder="Sem comissão automática"
+            />
           </div>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" name="active" defaultChecked={user.active} />

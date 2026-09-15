@@ -1,4 +1,5 @@
 import { prisma, getTenantClient } from "@opero/database";
+import { dispatchWebhookEvent } from "@/lib/webhooks";
 import type { ChargeStatus } from "./types";
 
 /**
@@ -18,7 +19,7 @@ export async function applyInvoiceStatus(gatewayReference: string, status: Charg
   const db = getTenantClient(invoice.tenantId);
 
   if (invoice.status === "PAID" && status === "PAID") {
-    return invoice; // already processed — webhooks can retry/duplicate
+    return invoice; // already processed — the gateway's own webhook can retry/duplicate
   }
 
   await db.invoice.update({ where: { id: invoice.id }, data: { status } });
@@ -35,6 +36,10 @@ export async function applyInvoiceStatus(gatewayReference: string, status: Charg
         description: `Pagamento recebido — cobrança ${invoice.id}`,
       },
     });
+
+    // OPERO's own outbound webhooks (/configuracoes/integracoes) — not to
+    // be confused with the gateway's inbound webhook that got us here.
+    await dispatchWebhookEvent(db, "invoice.paid", { invoiceId: invoice.id, amount: Number(invoice.amount) });
   }
 
   return invoice;
