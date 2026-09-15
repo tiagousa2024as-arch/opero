@@ -1,0 +1,15 @@
+{
+  "extends": "@opero/config/base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "Node",
+    "lib": ["ES2022"],
+    "noEmit": false,
+    "declaration": false,
+    "outDir": "dist",
+    "experimentalDecorators": true
+  },
+  "include": ["bin", "lib"],
+  "exclude": ["node_modules", "cdk.out", "dist"]
+}

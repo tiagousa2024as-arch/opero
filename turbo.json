@@ -1,0 +1,29 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [".env"],
+  // Turbo's default "strict" env mode only forwards env vars declared per-task
+  // to the underlying process, which silently broke `pnpm test`/`pnpm build`:
+  // DATABASE_URL, NEXTAUTH_SECRET, etc. never reached the child process even
+  // though the shell (and CI) had them set, causing "Environment variable not
+  // found: DATABASE_URL" from Prisma. "loose" restores normal env inheritance.
+  "envMode": "loose",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    }
+  }
+}

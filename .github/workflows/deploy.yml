@@ -1,0 +1,83 @@
+name: Deploy
+
+# Production deploy (PART F Phase 2-3): build the web and worker images,
+# push both to ECR, run pending Prisma migrations against the production
+# database, then force a new ECS deployment for each service so they
+# pick up the new image. Everything here is gated behind the `production`
+# GitHub Environment, which should hold the AWS credentials and require
+# them to actually exist before this can run at all — see PART G: this
+# needs a real AWS account with billing configured, which is not assumed
+# to be true yet.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write # for OIDC role assumption — see infra/README.md for setup
+      contents: read
+    env:
+      AWS_REGION: sa-east-1
+      ECS_CLUSTER: opero
+      WEB_ECR_REPOSITORY: opero-web
+      WEB_ECS_SERVICE: opero-web
+      WORKER_ECR_REPOSITORY: opero-worker
+      WORKER_ECS_SERVICE: opero-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push web image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -f Dockerfile -t "$REGISTRY/$WEB_ECR_REPOSITORY:${{ github.sha }}" -t "$REGISTRY/$WEB_ECR_REPOSITORY:latest" .
+          docker push "$REGISTRY/$WEB_ECR_REPOSITORY:${{ github.sha }}"
+          docker push "$REGISTRY/$WEB_ECR_REPOSITORY:latest"
+
+      - name: Build and push worker image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -f apps/worker/Dockerfile -t "$REGISTRY/$WORKER_ECR_REPOSITORY:${{ github.sha }}" -t "$REGISTRY/$WORKER_ECR_REPOSITORY:latest" .
+          docker push "$REGISTRY/$WORKER_ECR_REPOSITORY:${{ github.sha }}"
+          docker push "$REGISTRY/$WORKER_ECR_REPOSITORY:latest"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run pending migrations against production
+        run: pnpm --filter @opero/database exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+
+      - name: Deploy new images to ECS
+        run: |
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WEB_ECS_SERVICE" --force-new-deployment
+          aws ecs update-service --cluster "$ECS_CLUSTER" --service "$WORKER_ECS_SERVICE" --force-new-deployment

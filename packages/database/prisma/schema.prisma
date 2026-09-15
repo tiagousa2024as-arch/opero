@@ -1,0 +1,484 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  OWNER
+  ADMIN
+  STAFF
+  FINANCE
+}
+
+enum ServiceOrderStatus {
+  OPEN
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
+
+enum ServiceOrderItemType {
+  SERVICE
+  PART
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  NO_SHOW
+  CANCELED
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELED
+}
+
+enum PaymentMethod {
+  PIX
+  BOLETO
+  CREDIT_CARD
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum InventoryMovementType {
+  IN
+  OUT
+}
+
+enum NfeStatus {
+  NOT_ISSUED
+  PROCESSING
+  ISSUED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Tenant & Users
+// ---------------------------------------------------------------------------
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  cnpj      String?
+  plan      String   @default("trial")
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users              User[]
+  customers          Customer[]
+  serviceCategories  ServiceCategory[]
+  serviceOrders      ServiceOrder[]
+  appointments       Appointment[]
+  invoices           Invoice[]
+  transactions       Transaction[]
+  notifications      Notification[]
+  auditLogs          AuditLog[]
+  inventoryItems     InventoryItem[]
+  inventoryMovements InventoryMovement[]
+  branches           Branch[]
+  commissions        Commission[]
+  apiKeys            ApiKey[]
+  webhooks           Webhook[]
+
+  @@map("tenants")
+}
+
+model User {
+  id                   String   @id @default(cuid())
+  tenantId             String   @map("tenant_id")
+  name                 String
+  email                String
+  passwordHash         String?  @map("password_hash")
+  role                 UserRole @default(STAFF)
+  active               Boolean  @default(true)
+  branchId             String?  @map("branch_id")
+  // Percentage (0-100) of a completed OS's total this staff member earns
+  // as commission. Null/0 means no automatic commission is generated.
+  commissionPercentage Decimal? @map("commission_percentage") @db.Decimal(5, 2)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch                Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  assignedServiceOrders ServiceOrder[] @relation("AssignedUser")
+  assignedAppointments  Appointment[]  @relation("AssignedUser")
+  auditLogs             AuditLog[]
+  commissions           Commission[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// CRM
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  phone     String?
+  email     String?
+  document  String?
+  address   String?
+  tags      String[] @default([])
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Self-service scheduling link (PART D.4: /portal-do-cliente/[token]/agendar).
+  publicBookingToken String? @unique @map("public_booking_token")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  serviceOrders ServiceOrder[]
+  appointments  Appointment[]
+  invoices      Invoice[]
+
+  @@index([tenantId])
+  @@index([tenantId, name])
+  @@map("customers")
+}
+
+model ServiceCategory {
+  id           String  @id @default(cuid())
+  tenantId     String  @map("tenant_id")
+  name         String
+  defaultPrice Decimal @default(0) @map("default_price") @db.Decimal(10, 2)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("service_categories")
+}
+
+// ---------------------------------------------------------------------------
+// Service Orders & Appointments
+// ---------------------------------------------------------------------------
+
+model ServiceOrder {
+  id             String             @id @default(cuid())
+  tenantId       String             @map("tenant_id")
+  customerId     String             @map("customer_id")
+  assignedUserId String?            @map("assigned_user_id")
+  branchId       String?            @map("branch_id")
+  status         ServiceOrderStatus @default(OPEN)
+  scheduledAt    DateTime?          @map("scheduled_at")
+  totalAmount    Decimal            @default(0) @map("total_amount") @db.Decimal(10, 2)
+  notes          String?
+  // Public budget-approval link (PART D.4: /portal-do-cliente/[token]/orcamento).
+  publicToken    String?            @unique @map("public_token")
+  approvedAt     DateTime?          @map("approved_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer           Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedUser       User?               @relation("AssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  branch             Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  items              ServiceOrderItem[]
+  appointments       Appointment[]
+  invoices           Invoice[]
+  inventoryMovements InventoryMovement[]
+  commission         Commission?
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("service_orders")
+}
+
+model ServiceOrderItem {
+  id              String               @id @default(cuid())
+  serviceOrderId  String               @map("service_order_id")
+  description     String
+  quantity        Decimal              @default(1) @db.Decimal(10, 2)
+  unitPrice       Decimal              @map("unit_price") @db.Decimal(10, 2)
+  type            ServiceOrderItemType @default(SERVICE)
+  // Set when a PART item was picked from stock — drives inventory consumption.
+  inventoryItemId String?              @map("inventory_item_id")
+
+  serviceOrder  ServiceOrder   @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem? @relation(fields: [inventoryItemId], references: [id], onDelete: SetNull)
+
+  @@index([serviceOrderId])
+  @@map("service_order_items")
+}
+
+model Appointment {
+  id             String            @id @default(cuid())
+  tenantId       String            @map("tenant_id")
+  customerId     String            @map("customer_id")
+  serviceOrderId String?           @map("service_order_id")
+  startTime      DateTime          @map("start_time")
+  endTime        DateTime          @map("end_time")
+  status         AppointmentStatus @default(SCHEDULED)
+  assignedUserId String?           @map("assigned_user_id")
+  // Set once apps/worker's scheduler has enqueued a reminder for this
+  // appointment, so it isn't enqueued again on the next scheduler tick.
+  reminderSentAt DateTime?         @map("reminder_sent_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  serviceOrder ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  assignedUser User?         @relation("AssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, startTime])
+  @@map("appointments")
+}
+
+// ---------------------------------------------------------------------------
+// Financeiro / Cobranca
+// ---------------------------------------------------------------------------
+
+model Invoice {
+  id               String         @id @default(cuid())
+  tenantId         String         @map("tenant_id")
+  serviceOrderId   String?        @map("service_order_id")
+  customerId       String         @map("customer_id")
+  amount           Decimal        @db.Decimal(10, 2)
+  dueDate          DateTime       @map("due_date")
+  status           InvoiceStatus  @default(PENDING)
+  paymentMethod    PaymentMethod? @map("payment_method")
+  gatewayReference String?        @map("gateway_reference")
+  gatewayProvider  String?        @map("gateway_provider")
+  paymentLinkUrl   String?        @map("payment_link_url")
+  nfeStatus        NfeStatus      @default(NOT_ISSUED) @map("nfe_status")
+  nfeProvider      String?        @map("nfe_provider")
+  nfeReference     String?        @map("nfe_reference")
+  nfeNumber        String?        @map("nfe_number")
+  nfePdfUrl        String?        @map("nfe_pdf_url")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  serviceOrder ServiceOrder? @relation(fields: [serviceOrderId], references: [id], onDelete: SetNull)
+  customer     Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  transactions Transaction[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([gatewayReference])
+  @@map("invoices")
+}
+
+model Transaction {
+  id               String          @id @default(cuid())
+  tenantId         String          @map("tenant_id")
+  type             TransactionType
+  category         String
+  amount           Decimal         @db.Decimal(10, 2)
+  date             DateTime
+  relatedInvoiceId String?         @map("related_invoice_id")
+  description      String?
+  createdAt        DateTime        @default(now()) @map("created_at")
+
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relatedInvoice Invoice? @relation(fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, date])
+  @@map("transactions")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & Audit
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id          String              @id @default(cuid())
+  tenantId    String              @map("tenant_id")
+  type        String
+  channel     NotificationChannel
+  target      String
+  scheduledAt DateTime?           @map("scheduled_at")
+  sentAt      DateTime?           @map("sent_at")
+  status      NotificationStatus  @default(PENDING)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  userId    String?  @map("user_id")
+  action    String
+  entity    String
+  entityId  String   @map("entity_id")
+  timestamp DateTime @default(now())
+  metadata  Json     @default("{}")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([tenantId, entity, entityId])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Estoque (Phase 3)
+// ---------------------------------------------------------------------------
+
+model InventoryItem {
+  id                String   @id @default(cuid())
+  tenantId          String   @map("tenant_id")
+  name              String
+  sku               String?
+  quantity          Decimal  @default(0) @db.Decimal(10, 2)
+  unitCost          Decimal  @default(0) @map("unit_cost") @db.Decimal(10, 2)
+  unitPrice         Decimal  @default(0) @map("unit_price") @db.Decimal(10, 2)
+  lowStockThreshold Decimal  @default(0) @map("low_stock_threshold") @db.Decimal(10, 2)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  movements         InventoryMovement[]
+  serviceOrderItems ServiceOrderItem[]
+
+  @@index([tenantId])
+  @@map("inventory_items")
+}
+
+model InventoryMovement {
+  id                    String                @id @default(cuid())
+  tenantId              String                @map("tenant_id")
+  inventoryItemId       String                @map("inventory_item_id")
+  type                  InventoryMovementType
+  quantity              Decimal               @db.Decimal(10, 2)
+  relatedServiceOrderId String?               @map("related_service_order_id")
+  date                  DateTime              @default(now())
+
+  tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inventoryItem       InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  relatedServiceOrder ServiceOrder? @relation(fields: [relatedServiceOrderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([inventoryItemId])
+  @@map("inventory_movements")
+}
+
+// ---------------------------------------------------------------------------
+// Filiais & Comissões (Phase 4)
+// ---------------------------------------------------------------------------
+
+model Branch {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  name      String
+  address   String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users         User[]
+  serviceOrders ServiceOrder[]
+
+  @@index([tenantId])
+  @@map("branches")
+}
+
+model Commission {
+  id             String   @id @default(cuid())
+  tenantId       String   @map("tenant_id")
+  userId         String   @map("user_id")
+  serviceOrderId String   @unique @map("service_order_id")
+  amount         Decimal  @db.Decimal(10, 2)
+  percentage     Decimal  @db.Decimal(5, 2)
+  paid           Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([userId])
+  @@map("commissions")
+}
+
+// ---------------------------------------------------------------------------
+// API pública & Webhooks (Phase 4)
+// ---------------------------------------------------------------------------
+
+model ApiKey {
+  id         String    @id @default(cuid())
+  tenantId   String    @map("tenant_id")
+  name       String
+  // SHA-256 of the actual key — the plaintext key is shown once at
+  // creation and never stored or retrievable again.
+  keyHash    String    @unique @map("key_hash")
+  keyPrefix  String    @map("key_prefix")
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("api_keys")
+}
+
+model Webhook {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  url       String
+  events    String[]
+  secret    String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries WebhookDelivery[]
+
+  @@index([tenantId])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id           String   @id @default(cuid())
+  webhookId    String   @map("webhook_id")
+  event        String
+  statusCode   Int?     @map("status_code")
+  success      Boolean
+  responseBody String?  @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@map("webhook_deliveries")
+}
